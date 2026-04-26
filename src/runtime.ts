@@ -128,6 +128,8 @@ export class AcpxRuntime implements AcpxRuntimeLike {
       mode: input.mode,
       cwd: input.cwd ?? this.options.cwd,
       resumeSessionId: input.resumeSessionId,
+      // Brain fork patch: thread per-session env vars to spawned subprocess.
+      env: input.env,
     });
 
     const handle: AcpRuntimeHandle = {

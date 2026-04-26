@@ -441,7 +441,11 @@ export class AcpClient {
       args,
       buildSpawnCommandOptions(
         spawnCommand,
-        buildAgentSpawnOptions(this.options.cwd, this.options.authCredentials),
+        buildAgentSpawnOptions(
+          this.options.cwd,
+          this.options.authCredentials,
+          this.options.extraEnv,
+        ),
       ),
     ) as ChildProcessByStdio<Writable, Readable, Readable>;
 

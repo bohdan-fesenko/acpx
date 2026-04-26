@@ -40,6 +40,13 @@ export type AcpRuntimeEnsureInput = {
   mode: AcpRuntimeSessionMode;
   resumeSessionId?: string;
   cwd?: string;
+  /**
+   * Brain fork patch: per-session env vars merged into the spawned subprocess
+   * environment. Caller (openclaw) supplies per-agent identity (BRAIN_AGENT_NAME,
+   * WF_AGENT_ROLE, BRAIN_PATH) so each ACPX session is identifiable. Merge order:
+   * process.env (parent) → env (this field) → authCredentials (most specific).
+   */
+  env?: Record<string, string>;
 };
 
 export type AcpRuntimeTurnAttachment = {

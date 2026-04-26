@@ -370,6 +370,12 @@ export class AcpRuntimeManager {
     mode: "persistent" | "oneshot";
     cwd?: string;
     resumeSessionId?: string;
+    /**
+     * Brain fork patch: per-session env vars passed through to the spawned
+     * agent subprocess via AcpClientOptions.extraEnv. Used by openclaw to
+     * propagate per-agent identity (BRAIN_AGENT_NAME, WF_AGENT_ROLE, etc.).
+     */
+    env?: Record<string, string>;
   }): Promise<SessionRecord> {
     const cwd = path.resolve(input.cwd?.trim() || this.options.cwd);
     const agentCommand = this.options.agentRegistry.resolve(input.agent);
@@ -397,6 +403,8 @@ export class AcpRuntimeManager {
       permissionMode: this.options.permissionMode,
       nonInteractivePermissions: this.options.nonInteractivePermissions,
       verbose: this.options.verbose,
+      // Brain fork patch: forward per-session env to client (→ subprocess spawn).
+      extraEnv: input.env,
     });
     let keepClientOpen = false;
 

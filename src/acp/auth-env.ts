@@ -59,8 +59,13 @@ function promotePrefixedAuthEnvironment(env: NodeJS.ProcessEnv): void {
 
 function buildAgentEnvironment(
   authCredentials: Record<string, string> | undefined,
+  extraEnv?: Record<string, string>,
 ): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env };
+  // Order of precedence (later wins): process.env (parent) → extraEnv (per-session
+  // injection) → auth credentials (most specific). Brain fork patch: extraEnv lets
+  // openclaw thread per-agent identity vars (BRAIN_AGENT_NAME, WF_AGENT_ROLE, etc.)
+  // through to the spawned subprocess so each ACPX session is identifiable.
+  const env: NodeJS.ProcessEnv = { ...process.env, ...extraEnv };
   promotePrefixedAuthEnvironment(env);
   if (!authCredentials) {
     return env;
@@ -101,6 +106,7 @@ export function resolveConfiguredAuthCredential(
 export function buildAgentSpawnOptions(
   cwd: string,
   authCredentials: Record<string, string> | undefined,
+  extraEnv?: Record<string, string>,
 ): {
   cwd: string;
   env: NodeJS.ProcessEnv;
@@ -109,7 +115,7 @@ export function buildAgentSpawnOptions(
 } {
   return {
     cwd,
-    env: buildAgentEnvironment(authCredentials),
+    env: buildAgentEnvironment(authCredentials, extraEnv),
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   };

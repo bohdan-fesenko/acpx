@@ -168,6 +168,13 @@ export type AcpClientOptions = {
   authCredentials?: Record<string, string>;
   authPolicy?: AuthPolicy;
   terminal?: boolean;
+  /**
+   * Brain fork patch: per-session env vars merged into spawned subprocess env
+   * (after process.env, before authCredentials). Lets openclaw thread per-agent
+   * identity (BRAIN_AGENT_NAME, WF_AGENT_ROLE, etc.) into the agent process
+   * so each ACPX session is identifiable in brain signals.
+   */
+  extraEnv?: Record<string, string>;
   suppressSdkConsoleErrors?: boolean;
   verbose?: boolean;
   sessionOptions?: {
