@@ -31,6 +31,33 @@ import type {
 import { AcpRuntimeError } from "../public/errors.js";
 import { parsePromptEventLine } from "../public/events.js";
 import { withConnectedSession } from "./connected-session.js";
+
+// Brain fork patch (TD-004): SIGTERM the agent process group, escalate to
+// SIGKILL after 2s if still alive. Used by AcpRuntimeManager.cancel for
+// responsive interrupt during long-running turns.
+function killAgentProcessTree(pid: number): void {
+  try {
+    process.kill(-pid, "SIGTERM");
+  } catch {
+    // process group may not exist (child not detached, or already dead)
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      return;
+    }
+  }
+  setTimeout(() => {
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        /* already dead */
+      }
+    }
+  }, 2000).unref();
+}
 import {
   applyConversation,
   applyLifecycleSnapshotToRecord,
@@ -871,8 +898,22 @@ export class AcpRuntimeManager {
   }
 
   async cancel(handle: AcpRuntimeHandle): Promise<void> {
-    const controller = this.activeControllers.get(handle.acpxRecordId ?? handle.sessionKey);
-    await controller?.requestCancelActivePrompt();
+    const recordId = handle.acpxRecordId ?? handle.sessionKey;
+    const controller = this.activeControllers.get(recordId);
+    // Brain fork patch (TD-004): fire graceful protocol cancel + fast-kill
+    // process tree in parallel. The graceful path often hangs during an
+    // active turn (queue-owner doesn't service the cancel until current
+    // turn completes → 30-120s latency). Direct SIGTERM to the agent
+    // subprocess group gives <1s interrupt. SIGKILL escalation handles
+    // unresponsive children. No-op on Windows (no process groups).
+    void controller?.requestCancelActivePrompt().catch(() => {
+      /* graceful cancel best-effort; fast-kill below handles unresponsive case */
+    });
+    const client = this.pendingPersistentClients.get(recordId);
+    const pid = client?.getAgentPid();
+    if (pid != null && pid > 1 && process.platform !== "win32") {
+      killAgentProcessTree(pid);
+    }
   }
 
   async close(

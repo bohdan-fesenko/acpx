@@ -112,11 +112,20 @@ export function buildAgentSpawnOptions(
   env: NodeJS.ProcessEnv;
   stdio: ["pipe", "pipe", "pipe"];
   windowsHide: true;
+  detached: boolean;
 } {
+  // Brain fork patch (TD-004): `detached: true` puts the agent subprocess in
+  // its own process group on POSIX. Required so that AcpRuntimeManager.cancel
+  // can fast-kill the entire subprocess tree via `process.kill(-pid, SIGTERM)`
+  // when graceful protocol cancel hangs (active turn doesn't service the
+  // cancel request until completion → 30-120s latency without fast-kill).
+  // No-op on Windows (windowsHide: true unchanged).
+  const detached = process.platform !== "win32";
   return {
     cwd,
     env: buildAgentEnvironment(authCredentials, extraEnv),
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
+    detached,
   };
 }
