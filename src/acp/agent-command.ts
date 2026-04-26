@@ -325,23 +325,32 @@ export async function ensureCopilotAcpSupport(command: string): Promise<void> {
 export function buildClaudeCodeOptionsMeta(
   options: AcpClientOptions["sessionOptions"],
 ): Record<string, unknown> | undefined {
-  if (!options) {
-    return undefined;
-  }
+  // Brain fork patch: always include thinking="adaptive" in _meta.claudeCode.options
+  // so claude-agent-acp's userProvidedOptions spread reaches the SDK with the
+  // adaptive thinking trigger. Without this, claude-agent-acp 0.31.0 doesn't
+  // set the thinking field and the SDK falls into the legacy
+  // {type:"enabled", budgetTokens} path — which Anthropic API now rejects for
+  // Opus 4.7 (returns 400 "thinking.type.enabled is not supported for this model").
+  //
+  // Adaptive thinking is the correct format for Opus 4.7+ per:
+  // https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking
+  // Effort level (xhigh/etc) is configured separately via session config options.
+  // Older models that don't support adaptive will be unaffected (SDK ignores
+  // adaptive setting for unsupported models per its capability detection).
+  const claudeCodeOptions: Record<string, unknown> = {
+    thinking: "adaptive",
+  };
 
-  const claudeCodeOptions: Record<string, unknown> = {};
-  if (typeof options.model === "string" && options.model.trim().length > 0) {
-    claudeCodeOptions.model = options.model;
-  }
-  if (Array.isArray(options.allowedTools)) {
-    claudeCodeOptions.allowedTools = [...options.allowedTools];
-  }
-  if (typeof options.maxTurns === "number") {
-    claudeCodeOptions.maxTurns = options.maxTurns;
-  }
-
-  if (Object.keys(claudeCodeOptions).length === 0) {
-    return undefined;
+  if (options) {
+    if (typeof options.model === "string" && options.model.trim().length > 0) {
+      claudeCodeOptions.model = options.model;
+    }
+    if (Array.isArray(options.allowedTools)) {
+      claudeCodeOptions.allowedTools = [...options.allowedTools];
+    }
+    if (typeof options.maxTurns === "number") {
+      claudeCodeOptions.maxTurns = options.maxTurns;
+    }
   }
 
   return {
