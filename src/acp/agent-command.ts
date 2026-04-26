@@ -325,20 +325,17 @@ export async function ensureCopilotAcpSupport(command: string): Promise<void> {
 export function buildClaudeCodeOptionsMeta(
   options: AcpClientOptions["sessionOptions"],
 ): Record<string, unknown> | undefined {
-  // Brain fork patch: always include thinking="adaptive" in _meta.claudeCode.options
-  // so claude-agent-acp's userProvidedOptions spread reaches the SDK with the
-  // adaptive thinking trigger. Without this, claude-agent-acp 0.31.0 doesn't
-  // set the thinking field and the SDK falls into the legacy
-  // {type:"enabled", budgetTokens} path — which Anthropic API now rejects for
-  // Opus 4.7 (returns 400 "thinking.type.enabled is not supported for this model").
+  // Brain fork patch: always include thinking={type:"adaptive"} in
+  // _meta.claudeCode.options so claude-agent-acp's userProvidedOptions spread
+  // reaches the SDK as the proper object shape. Bare string "adaptive" is
+  // ignored by the SDK schema → falls into legacy {type:"enabled",
+  // budgetTokens: N} default → Anthropic API rejects for Opus 4.7 with
+  // "thinking.type.enabled is not supported for this model. Use thinking.type.adaptive".
   //
-  // Adaptive thinking is the correct format for Opus 4.7+ per:
-  // https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking
-  // Effort level (xhigh/etc) is configured separately via session config options.
-  // Older models that don't support adaptive will be unaffected (SDK ignores
-  // adaptive setting for unsupported models per its capability detection).
+  // Adaptive thinking shape per Anthropic SDK + Claude Code 2.1.x.
+  // Effort level (xhigh/etc) is configured separately via Claude Code settings.
   const claudeCodeOptions: Record<string, unknown> = {
-    thinking: "adaptive",
+    thinking: { type: "adaptive" },
   };
 
   if (options) {
