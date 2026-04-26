@@ -2,10 +2,20 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+// CUSTOMIZATION (brain fork v0.6.1-brain.2): pinned to 0.30.0
+// claude-agent-acp@0.31.0 switched to a new native dependency
+// `@anthropic-ai/claude-agent-sdk-linux-x64-musl` which requires musl libc
+// (Alpine). Our deploy targets glibc (Ubuntu/Debian VM), so the native binary
+// is not present → newSession returns RequestError -32603 "Internal error"
+// with details "Claude Code native binary not found at .../linux-x64-musl/claude".
+// 0.30.0 still uses the legacy @anthropic-ai/claude-code package which works
+// across libc variants. Revisit when 0.31.x ships a glibc native binary OR
+// when we install Claude Code via the native installer + thread
+// pathToClaudeCodeExecutable through ACP options.
 const ACP_ADAPTER_PACKAGE_RANGES = {
   pi: "^0.0.26",
   codex: "^0.12.0",
-  claude: "^0.31.0",
+  claude: "0.30.0",
 } as const;
 
 type BuiltInAgentPackageSpec = {
