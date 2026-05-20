@@ -11,6 +11,7 @@ test("parseQueueRequest accepts submit_prompt with nonInteractivePermissions", (
     permissionMode: "approve-reads",
     nonInteractivePermissions: "fail",
     timeoutMs: 1_500,
+    promptRetries: 2,
     waitForCompletion: true,
   });
 
@@ -23,6 +24,7 @@ test("parseQueueRequest accepts submit_prompt with nonInteractivePermissions", (
     permissionMode: "approve-reads",
     nonInteractivePermissions: "fail",
     timeoutMs: 1_500,
+    promptRetries: 2,
     waitForCompletion: true,
   });
 });
@@ -34,6 +36,19 @@ test("parseQueueRequest rejects invalid nonInteractivePermissions value", () => 
     message: "hello",
     permissionMode: "approve-reads",
     nonInteractivePermissions: "invalid",
+    waitForCompletion: false,
+  });
+
+  assert.equal(parsed, null);
+});
+
+test("parseQueueRequest rejects invalid promptRetries value", () => {
+  const parsed = parseQueueRequest({
+    type: "submit_prompt",
+    requestId: "req-invalid-prompt-retries",
+    message: "hello",
+    permissionMode: "approve-reads",
+    promptRetries: -1,
     waitForCompletion: false,
   });
 

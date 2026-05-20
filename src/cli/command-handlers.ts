@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { Command, InvalidArgumentError } from "commander";
 import { isCodexInvocation } from "../acp/codex-compat.js";
+import { loadPermissionPolicySpec } from "../permission-policy.js";
 import {
   mergePromptSourceWithText,
   parsePromptSource,
@@ -20,6 +21,7 @@ import type {
   SessionAgentContent,
   SessionRecord,
   SessionUserContent,
+  PermissionPolicy,
 } from "../types.js";
 import type { ResolvedAcpxConfig } from "./config.js";
 import {
@@ -170,12 +172,24 @@ function sessionOptionsFromGlobalFlags(
   };
 }
 
+async function resolvePermissionPolicyFromFlags(
+  globalFlags: GlobalFlags,
+): Promise<PermissionPolicy | undefined> {
+  try {
+    return await loadPermissionPolicySpec(globalFlags.permissionPolicy, globalFlags.cwd);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new InvalidArgumentError(`Invalid permission policy: ${message}`);
+  }
+}
+
 function buildSessionStartOptions(params: {
   agent: ResolvedAgentInvocation;
   flags: SessionsNewFlags;
   globalFlags: GlobalFlags;
   config: ResolvedAcpxConfig;
   permissionMode: ReturnType<typeof resolvePermissionMode>;
+  permissionPolicy?: PermissionPolicy;
 }): Parameters<SessionModule["createSession"]>[0] {
   return {
     agentCommand: params.agent.agentCommand,
@@ -185,6 +199,7 @@ function buildSessionStartOptions(params: {
     mcpServers: params.config.mcpServers,
     permissionMode: params.permissionMode,
     nonInteractivePermissions: params.globalFlags.nonInteractivePermissions,
+    permissionPolicy: params.permissionPolicy,
     authCredentials: params.config.auth,
     authPolicy: params.globalFlags.authPolicy,
     terminal: params.globalFlags.terminal,
@@ -259,6 +274,7 @@ export async function handlePrompt(
   const globalFlags = resolveGlobalFlags(command, config);
   const outputPolicy = resolveRequestedOutputPolicy(globalFlags);
   const permissionMode = resolvePermissionMode(globalFlags, config.defaultPermissions);
+  const permissionPolicy = await resolvePermissionPolicyFromFlags(globalFlags);
   const prompt = await readPrompt(promptParts, flags.file, globalFlags.cwd);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
   const [
@@ -286,6 +302,7 @@ export async function handlePrompt(
     mcpServers: config.mcpServers,
     permissionMode,
     nonInteractivePermissions: globalFlags.nonInteractivePermissions,
+    permissionPolicy,
     authCredentials: config.auth,
     authPolicy: globalFlags.authPolicy,
     terminal: globalFlags.terminal,
@@ -353,6 +370,7 @@ export async function handleExec(
   const globalFlags = resolveGlobalFlags(command, config);
   const outputPolicy = resolveRequestedOutputPolicy(globalFlags);
   const permissionMode = resolvePermissionMode(globalFlags, config.defaultPermissions);
+  const permissionPolicy = await resolvePermissionPolicyFromFlags(globalFlags);
   const prompt = await readPrompt(promptParts, flags.file, globalFlags.cwd);
   const [{ createOutputFormatter }, { runOnce }] = await Promise.all([
     loadOutputModule(),
@@ -370,6 +388,7 @@ export async function handleExec(
     mcpServers: config.mcpServers,
     permissionMode,
     nonInteractivePermissions: globalFlags.nonInteractivePermissions,
+    permissionPolicy,
     authCredentials: config.auth,
     authPolicy: globalFlags.authPolicy,
     terminal: globalFlags.terminal,
@@ -669,6 +688,7 @@ export async function handleSessionsNew(
 ): Promise<void> {
   const globalFlags = resolveGlobalFlags(command, config);
   const permissionMode = resolvePermissionMode(globalFlags, config.defaultPermissions);
+  const permissionPolicy = await resolvePermissionPolicyFromFlags(globalFlags);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
   const [{ createSession, closeSession }, { printCreatedSessionBanner, printNewSessionByFormat }] =
     await Promise.all([loadSessionModule(), loadOutputRenderModule()]);
@@ -687,7 +707,14 @@ export async function handleSessionsNew(
   }
 
   const created = await createSession(
-    buildSessionStartOptions({ agent, flags, globalFlags, config, permissionMode }),
+    buildSessionStartOptions({
+      agent,
+      flags,
+      globalFlags,
+      config,
+      permissionMode,
+      permissionPolicy,
+    }),
   );
 
   printCreatedSessionBanner(created, agent.agentName, globalFlags.format, globalFlags.jsonStrict);
@@ -708,11 +735,19 @@ export async function handleSessionsEnsure(
 ): Promise<void> {
   const globalFlags = resolveGlobalFlags(command, config);
   const permissionMode = resolvePermissionMode(globalFlags, config.defaultPermissions);
+  const permissionPolicy = await resolvePermissionPolicyFromFlags(globalFlags);
   const agent = resolveAgentInvocation(explicitAgentName, globalFlags, config);
   const [{ ensureSession }, { printCreatedSessionBanner, printEnsuredSessionByFormat }] =
     await Promise.all([loadSessionModule(), loadOutputRenderModule()]);
   const result = await ensureSession(
-    buildSessionStartOptions({ agent, flags, globalFlags, config, permissionMode }),
+    buildSessionStartOptions({
+      agent,
+      flags,
+      globalFlags,
+      config,
+      permissionMode,
+      permissionPolicy,
+    }),
   );
 
   if (result.created) {

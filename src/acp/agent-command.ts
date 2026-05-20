@@ -1,6 +1,11 @@
 import { spawn } from "node:child_process";
+import path from "node:path";
 import { CopilotAcpUnsupportedError } from "../errors.js";
-import { buildSpawnCommandOptions } from "../spawn-command-options.js";
+import {
+  buildSpawnCommandOptions,
+  readWindowsEnvValue,
+  resolveWindowsCommand,
+} from "../spawn-command-options.js";
 import { type AcpClientOptions } from "../types.js";
 import { basenameToken, splitCommandLine } from "./client-process.js";
 
@@ -320,4 +325,21 @@ export function buildClaudeCodeOptionsMeta(
   }
 
   return meta;
+}
+
+export function resolveClaudeCodeExecutable(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  if (platform !== "win32") {
+    return undefined;
+  }
+  if (readWindowsEnvValue(env, "CLAUDE_CODE_EXECUTABLE")) {
+    return undefined;
+  }
+  const resolved = resolveWindowsCommand("claude", env);
+  if (!resolved) {
+    return undefined;
+  }
+  return path.resolve(resolved);
 }

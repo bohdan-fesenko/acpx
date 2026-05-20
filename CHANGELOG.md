@@ -12,7 +12,53 @@ Repo: https://github.com/openclaw/acpx
 
 ### Fixes
 
+## 2026.5.15 (v0.8.0)
+
+### Changes
+
+- Runtime/embedding: add an optional `onPermissionRequest` callback to `AcpRuntimeOptions` and `AcpClientOptions` so embedders can intercept ACP per-call permission requests with their own UI. Returning a decision short-circuits the mode-based resolver; returning `undefined` falls through to it, leaving CLI behavior unchanged. Thanks @DaniAkash.
+- Runtime/embedding: `AcpRuntime.ensureSession` now accepts `sessionOptions` (`systemPrompt`, `model`, `allowedTools`, `maxTurns`) for fresh sessions, threading the values into `_meta.systemPrompt` (and `_meta.claudeCode.options.*`) on the underlying `session/new` request and persisting them onto the new record. Reusing an existing persistent record continues to ignore `sessionOptions` since system prompts are fixed at `newSession` time. `SessionAgentOptions` and `SystemPromptOption` are now re-exported from `acpx/runtime`. Thanks @DaniAkash.
+- Runtime/embedding: surface advertised models on `AcpRuntimeStatus.models` so embedders can build model pickers without reaching into private session records. Thanks @DaniAkash.
+- CLI/permissions: add `--permission-policy`/`--policy` for per-tool ACP permission rules with `autoApprove`, `autoDeny`, `escalate`, and `defaultAction`; non-interactive escalations now surface structured tool name/input metadata for orchestrators.
+
+### Breaking
+
+### Fixes
+
+- Runtime/embedding: preserve structured ACP `tool_call_update` details on public runtime events, including content, output, locations, kind, and raw payload fields, so embedders can display live tool progress. (#306) Thanks @joeia26.
+- CLI/sessions: checkpoint live assistant and tool updates while prompt turns are still running, so `sessions read` and `sessions history` can show in-flight progress instead of only the submitted prompt. (#314) Thanks @AndroidPoet.
+- Flows: keep external TypeScript flow modules that import `acpx/flows` compatible with current `tsx` loader behavior.
+- Terminal: run no-argument `terminal/create` command lines so agents that send an unsplit command do not fail with `ENOENT`. Thanks @xdjyxu.
+- CLI/config: accept command-local `--format` on `config show` and `config init`.
+- CLI/sessions: accept the documented `-s` shorthand on `sessions new` and `sessions ensure`.
+- Replay viewer: add help output for `pnpm viewer --help` without starting a server.
+- Replay viewer: make `pnpm viewer status` and `pnpm viewer stop` dispatch to the requested command instead of always prepending `start`.
+- Package: keep `npm pack --json` output parseable by running the prepack build quietly.
+- CLI/output: exit cleanly on broken pipes so common pipelines such as `acpx ... | grep -q ...` do not crash with an unhandled `EPIPE`.
+- Tooling: document the current Node.js 22.13+ and pnpm 10.33.2 floor.
+- Tooling/docs: document npm-based pnpm bootstrap for clean Node 22.13 setups with stale Corepack signing keys.
+- Docs/auth: document the supported `authPolicy` values and ACP credential selection behavior.
+- Docs/skills: make the quick setup skill-install command noninteractive and route unsupported harnesses to the reference URL.
+- CLI/queue: honor per-request `--prompt-retries` when sending a prompt to an already-warm persistent queue owner.
+- Runtime/embedding: reject unsupported advertised config option keys before forwarding them to adapters, and map generic `thinking` controls to advertised `effort` options when available. (#293)
+
+## 2026.5.5 (v0.7.0)
+
+### Changes
+
+- Flows/authoring: add `decision()` and `decisionEdge()` helpers for constrained LLM branching on top of the existing `acp`, `parse`, and `switch` machinery. (#278) Thanks @JoshuaLelon.
+
+### Breaking
+
+### Fixes
+
+- Runtime/embedding: preserve normalized ACP `detailCode` values on failed turn results and legacy error events, so embedders can branch on stable error detail codes. (#288) Thanks @kunchenguid.
+- Runtime/config: persist advertised `configOptions` from `session/new` and `session/load` and expose their keys through handle-aware runtime capabilities. (#282) Thanks @samithaj.
+- CLI/queue: ask active queue owners to send ACP `session/close` before `sessions close` terminates their adapter process. (#283) Thanks @codefromthecrypt.
 - CLI/models: fail clearly when `--model` targets a non-Claude ACP agent that does not advertise ACP model support, and reject model ids outside an adapter's advertised `availableModels` instead of silently falling back to the adapter default.
+- Windows/Claude: resolve the `claude.exe` executable from PATH before spawning Claude ACP sessions, so native Windows launches do not depend on shell-specific command lookup. (#289) Thanks @MikeChongCan.
+- Client/ACP: send `session/close` from `closeSession()` instead of the experimental `nes/close` method, so adapters without NES support can tear down sessions cleanly. (#291) Thanks @hexsprite.
+- Runtime/WSL: recognize Windows `.cmd` and `.bat` ACP agent wrappers for cwd translation, including wrappers installed on non-C drives. (#280) Thanks @solomonneas.
 
 ## 2026.4.25 (v0.6.0)
 

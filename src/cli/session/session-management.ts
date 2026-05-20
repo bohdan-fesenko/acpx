@@ -1,9 +1,12 @@
 import { AcpClient, type SessionCreateResult } from "../../acp/client.js";
 import { formatErrorMessage } from "../../acp/error-normalization.js";
 import { withInterrupt, withTimeout } from "../../async-control.js";
+import { persistSessionOptions } from "../../runtime/engine/session-options.js";
+import { applyConfigOptionsToRecord } from "../../session/config-options.js";
 import { createSessionConversation } from "../../session/conversation-model.js";
 import { defaultSessionEventLog } from "../../session/event-log.js";
 import { setCurrentModelId, syncAdvertisedModelState } from "../../session/mode-preference.js";
+import { applyRequestedModelIfAdvertised } from "../../session/model-application.js";
 import {
   absolutePath,
   findGitRepositoryRoot,
@@ -16,60 +19,11 @@ import { normalizeRuntimeSessionId } from "../../session/runtime-session-id.js";
 import type { SessionEnsureResult, SessionRecord } from "../../types.js";
 import { DEFAULT_QUEUE_OWNER_TTL_MS } from "./contracts.js";
 import type {
-  SessionAgentOptions,
   SessionCreateOptions,
   SessionCreateWithClientResult,
   SessionEnsureOptions,
 } from "./contracts.js";
-import { applyRequestedModelIfAdvertised } from "./model-helpers.js";
 import { setSessionModel } from "./session-control.js";
-
-function persistSessionOptions(
-  record: SessionRecord,
-  options: SessionAgentOptions | undefined,
-): void {
-  const systemPromptOption = options?.systemPrompt;
-  const normalizedSystemPrompt =
-    typeof systemPromptOption === "string" && systemPromptOption.length > 0
-      ? systemPromptOption
-      : systemPromptOption &&
-          typeof systemPromptOption === "object" &&
-          typeof systemPromptOption.append === "string" &&
-          systemPromptOption.append.length > 0
-        ? { append: systemPromptOption.append }
-        : undefined;
-
-  const next =
-    options &&
-    ({
-      model: typeof options.model === "string" ? options.model : undefined,
-      allowed_tools: Array.isArray(options.allowedTools) ? [...options.allowedTools] : undefined,
-      max_turns: typeof options.maxTurns === "number" ? options.maxTurns : undefined,
-      system_prompt: normalizedSystemPrompt,
-    } satisfies NonNullable<NonNullable<SessionRecord["acpx"]>["session_options"]>);
-
-  const hasValues = Boolean(
-    next &&
-    ((typeof next.model === "string" && next.model.trim().length > 0) ||
-      (Array.isArray(next.allowed_tools) && next.allowed_tools.length > 0) ||
-      typeof next.max_turns === "number" ||
-      next.system_prompt !== undefined),
-  );
-
-  if (hasValues && next) {
-    record.acpx = {
-      ...record.acpx,
-      session_options: next,
-    };
-    return;
-  }
-
-  if (!record.acpx) {
-    return;
-  }
-
-  delete record.acpx.session_options;
-}
 
 async function createSessionRecordWithClient(
   client: AcpClient,
@@ -79,6 +33,7 @@ async function createSessionRecordWithClient(
   await withTimeout(client.start(), options.timeoutMs);
   let sessionId: string;
   let agentSessionId: string | undefined;
+  let sessionResult: Awaited<ReturnType<AcpClient["createSession" | "loadSession"]>>;
   let sessionModels: SessionCreateResult["models"];
   let requestedModelApplied = false;
 
@@ -96,6 +51,7 @@ async function createSessionRecordWithClient(
       );
       sessionId = options.resumeSessionId;
       agentSessionId = normalizeRuntimeSessionId(loadedSession.agentSessionId);
+      sessionResult = loadedSession;
       sessionModels = loadedSession.models;
       requestedModelApplied = await applyRequestedModelIfAdvertised({
         client,
@@ -117,6 +73,7 @@ async function createSessionRecordWithClient(
     const createdSession = await withTimeout(client.createSession(cwd), options.timeoutMs);
     sessionId = createdSession.sessionId;
     agentSessionId = normalizeRuntimeSessionId(createdSession.agentSessionId);
+    sessionResult = createdSession;
     sessionModels = createdSession.models;
     requestedModelApplied = await applyRequestedModelIfAdvertised({
       client,
@@ -154,6 +111,7 @@ async function createSessionRecordWithClient(
   };
 
   persistSessionOptions(record, options.sessionOptions);
+  applyConfigOptionsToRecord(record, sessionResult);
   syncAdvertisedModelState(record, sessionModels);
   if (requestedModelApplied) {
     setCurrentModelId(record, options.sessionOptions?.model);
@@ -172,6 +130,7 @@ export async function createSessionWithClient(
     mcpServers: options.mcpServers,
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
+    permissionPolicy: options.permissionPolicy,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
     terminal: options.terminal,
@@ -246,6 +205,7 @@ export async function ensureSession(options: SessionEnsureOptions): Promise<Sess
     mcpServers: options.mcpServers,
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
+    permissionPolicy: options.permissionPolicy,
     authCredentials: options.authCredentials,
     authPolicy: options.authPolicy,
     terminal: options.terminal,

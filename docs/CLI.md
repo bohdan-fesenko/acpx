@@ -43,11 +43,11 @@ acpx [global_options] <agent> sessions [list | new [--name <name>] | ensure [--n
 
 `<agent>` can be:
 
-- built-in friendly name from [../README.md](../README.md)
+- built-in friendly name from [the README](https://github.com/openclaw/acpx/blob/main/README.md)
 - unknown token (treated as raw command)
 - overridden by `--agent <command>` escape hatch
 
-Additional built-in agent docs live in [../agents/README.md](../agents/README.md).
+Additional built-in agent docs live in [the Agents page](agents.md).
 
 Prompt options:
 
@@ -114,6 +114,7 @@ All global options:
 | `--json-strict`                          | Strict JSON mode                               | Requires `--format json`; suppresses non-JSON stderr output.                                                                                                                                               |
 | `--no-terminal`                          | Disable ACP terminal capability                | Advertises `clientCapabilities.terminal: false` during ACP initialize for new agent clients.                                                                                                               |
 | `--non-interactive-permissions <policy>` | Non-TTY prompt policy                          | `deny` (default) or `fail` when approval prompt cannot be shown.                                                                                                                                           |
+| `--permission-policy <json-or-file>`     | Per-tool permission policy                     | JSON object or file path with `autoApprove`, `autoDeny`, `escalate`, and optional `defaultAction` (`approve`, `deny`, `escalate`). Alias: `--policy`.                                                      |
 | `--timeout <seconds>`                    | Max wait time for agent response               | Must be positive. Decimal seconds allowed.                                                                                                                                                                 |
 | `--ttl <seconds>`                        | Queue owner idle TTL before shutdown           | Default `300`. `0` disables TTL.                                                                                                                                                                           |
 | `--model <id>`                           | Set agent model                                | Claude-compatible adapters may consume session creation metadata; other agents must advertise ACP models and support `session/set_model`, otherwise `acpx` fails clearly instead of silently falling back. |
@@ -128,6 +129,7 @@ acpx --approve-all codex 'apply this patch and run tests'
 acpx --approve-reads codex 'inspect the repo and propose a plan'
 acpx --deny-all codex 'summarize this code without running tools'
 acpx --non-interactive-permissions fail codex 'fail fast when prompt cannot be shown'
+acpx --policy '{"escalate":["execute"],"defaultAction":"deny"}' --format json codex exec 'run tests'
 
 acpx --cwd ~/repos/api codex 'review auth middleware'
 acpx --format json codex exec 'summarize open TODO items'
@@ -198,7 +200,7 @@ acpx [global_options] claude sessions [list | new [--name <name>] | ensure [--na
 
 Built-in command mapping: `claude -> npx -y @agentclientprotocol/claude-agent-acp`
 
-Additional built-in agent docs live in [../agents/README.md](../agents/README.md).
+Additional built-in agent docs live in [the Agents page](agents.md).
 
 ### Custom positional agents
 
@@ -537,6 +539,12 @@ Non-interactive prompt policy:
 
 - `--non-interactive-permissions deny`: deny non-read/search prompts when no TTY (default)
 - `--non-interactive-permissions fail`: fail with `PERMISSION_PROMPT_UNAVAILABLE`
+
+Per-tool policy:
+
+- `--permission-policy <json-or-file>` or `--policy <json-or-file>` matches ACP permission requests by tool kind, title head, title, or raw input tool/name.
+- `autoDeny` wins over `autoApprove`, which wins over `escalate`; unmatched requests use `defaultAction` when set, otherwise the selected permission mode.
+- Non-interactive escalations deny the current request. Text mode prints a `[permission]` notice; JSON mode keeps raw ACP NDJSON and includes escalation details, including tool input when supplied by the agent, on the `session/request_permission` response at `_meta.acpx.permissionEscalation`.
 
 ## Exit codes
 

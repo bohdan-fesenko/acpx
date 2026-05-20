@@ -53,10 +53,12 @@ async function submitToRunningOwner(
     prompt: options.prompt,
     permissionMode: options.permissionMode,
     nonInteractivePermissions: options.nonInteractivePermissions,
+    permissionPolicy: options.permissionPolicy,
     outputFormatter: options.outputFormatter,
     errorEmissionPolicy: options.errorEmissionPolicy,
     timeoutMs: options.timeoutMs,
     suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
+    promptRetries: options.promptRetries,
     waitForCompletion,
     verbose: options.verbose,
     sessionOptions: options.sessionOptions,
@@ -161,6 +163,15 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
     turnController.clearActiveController();
   };
 
+  const closeActiveBackendSession = async (timeoutMs?: number): Promise<boolean> => {
+    const latestRecord = await resolveSessionRecord(options.sessionId);
+    if (!sharedClient.supportsCloseSession()) {
+      return false;
+    }
+    await withTimeout(sharedClient.closeSession(latestRecord.acpSessionId), timeoutMs);
+    return true;
+  };
+
   const runPromptTurn = async <T>(run: () => Promise<T>): Promise<T> => {
     turnController.beginTurn();
     try {
@@ -182,6 +193,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
           await applyPendingCancel();
           return true;
         },
+        closeSession: async (timeoutMs?: number) => await closeActiveBackendSession(timeoutMs),
         setSessionMode: async (modeId: string, timeoutMs?: number) => {
           await turnController.setSessionMode(modeId, timeoutMs);
         },
@@ -236,7 +248,7 @@ export async function runSessionQueueOwner(options: QueueOwnerRuntimeOptions): P
             authCredentials: options.authCredentials,
             authPolicy: options.authPolicy,
             suppressSdkConsoleErrors: options.suppressSdkConsoleErrors,
-            promptRetries: options.promptRetries,
+            promptRetries: task.promptRetries ?? 0,
             sessionOptions: options.sessionOptions,
             onClientAvailable: setActiveController,
             onClientClosed: clearActiveController,

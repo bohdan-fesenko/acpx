@@ -14,6 +14,7 @@ import {
   SessionResumeRequiredError,
 } from "../../errors.js";
 import { incrementPerfCounter } from "../../perf-metrics.js";
+import { applyConfigOptionsToRecord } from "../../session/config-options.js";
 import {
   getDesiredConfigOptions,
   getDesiredModeId,
@@ -290,6 +291,7 @@ export async function connectAndLoadSession(
         options.timeoutMs,
       );
       reconcileAgentSessionId(record, loadResult.agentSessionId);
+      applyConfigOptionsToRecord(record, loadResult);
       sessionModels = loadResult.models;
       resumed = true;
     } catch (error) {
@@ -308,6 +310,7 @@ export async function connectAndLoadSession(
       sessionId = createdSession.sessionId;
       createdFreshSession = true;
       pendingAgentSessionId = createdSession.agentSessionId;
+      applyConfigOptionsToRecord(record, createdSession);
       sessionModels = createdSession.models;
     }
   } else {
@@ -321,6 +324,7 @@ export async function connectAndLoadSession(
     sessionId = createdSession.sessionId;
     createdFreshSession = true;
     pendingAgentSessionId = createdSession.agentSessionId;
+    applyConfigOptionsToRecord(record, createdSession);
     sessionModels = createdSession.models;
   }
 

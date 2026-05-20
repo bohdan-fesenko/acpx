@@ -46,6 +46,7 @@ export type GlobalFlags = PermissionFlags & {
   maxTurns?: number;
   systemPrompt?: SystemPromptOption;
   promptRetries?: number;
+  permissionPolicy?: string;
 };
 
 export type PromptFlags = {
@@ -262,6 +263,11 @@ export function addGlobalFlags(command: Command): Command {
       "When prompting is unavailable: deny or fail",
       parseNonInteractivePermissionPolicy,
     )
+    .option(
+      "--permission-policy <json-or-file>",
+      "Permission policy JSON or path (autoApprove, autoDeny, escalate, defaultAction)",
+    )
+    .option("--policy <json-or-file>", "Alias for --permission-policy")
     .option("--format <fmt>", "Output format: text, json, quiet", parseOutputFormat)
     .option("--suppress-reads", "Suppress raw read-file contents in output")
     .option("--model <id>", "Agent model id")
@@ -350,6 +356,12 @@ export function resolveGlobalFlags(command: Command, config: ResolvedAcpxConfig)
   const format = opts.format ?? config.format ?? "text";
   const jsonStrict = opts.jsonStrict === true;
   const verbose = opts.verbose === true;
+  const permissionPolicy =
+    typeof opts.permissionPolicy === "string"
+      ? opts.permissionPolicy
+      : typeof opts.policy === "string"
+        ? opts.policy
+        : undefined;
 
   if (jsonStrict && format !== "json") {
     throw new InvalidArgumentError("--json-strict requires --format json");
@@ -359,11 +371,22 @@ export function resolveGlobalFlags(command: Command, config: ResolvedAcpxConfig)
     throw new InvalidArgumentError("--json-strict cannot be combined with --verbose");
   }
 
+  if (
+    typeof opts.permissionPolicy === "string" &&
+    typeof opts.policy === "string" &&
+    opts.permissionPolicy !== opts.policy
+  ) {
+    throw new InvalidArgumentError(
+      "Use only one permission policy flag: --permission-policy or --policy",
+    );
+  }
+
   return {
     agent: opts.agent,
     cwd: opts.cwd ?? process.cwd(),
     authPolicy: opts.authPolicy ?? config.authPolicy,
     nonInteractivePermissions: opts.nonInteractivePermissions ?? config.nonInteractivePermissions,
+    permissionPolicy,
     jsonStrict,
     suppressReads: opts.suppressReads === true,
     terminal: opts.terminal === false ? false : undefined,

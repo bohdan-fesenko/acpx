@@ -18,6 +18,7 @@ import {
   terminateProcess,
   terminateQueueOwnerForSession,
   tryCancelOnRunningOwner,
+  tryCloseSessionOnRunningOwner,
   trySetConfigOptionOnRunningOwner,
   trySetModelOnRunningOwner,
   trySetModeOnRunningOwner,
@@ -187,6 +188,9 @@ async function isLikelyMatchingProcess(pid: number, agentCommand: string): Promi
 
 export async function closeSession(sessionId: string): Promise<SessionRecord> {
   const record = await resolveSessionRecord(sessionId);
+  await tryCloseSessionOnRunningOwner({ sessionId: record.acpxRecordId }).catch(() => {
+    // Preserve local close semantics even if best-effort ACP session shutdown fails.
+  });
   await terminateQueueOwnerForSession(record.acpxRecordId);
 
   if (

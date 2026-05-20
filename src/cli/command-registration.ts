@@ -71,7 +71,7 @@ export function registerSessionsCommand(
   sessionsCommand
     .command("new")
     .description("Create a fresh session for current cwd")
-    .option("--name <name>", "Session name", parseSessionName)
+    .option("-s, --name <name>", "Session name", parseSessionName)
     .option("--resume-session <id>", "Resume existing ACP session id", (value: string) =>
       parseNonEmptyValue("Resume session id", value),
     )
@@ -82,7 +82,7 @@ export function registerSessionsCommand(
   sessionsCommand
     .command("ensure")
     .description("Ensure a session exists for current cwd or ancestor")
-    .option("--name <name>", "Session name", parseSessionName)
+    .option("-s, --name <name>", "Session name", parseSessionName)
     .option("--resume-session <id>", "Resume existing ACP session id", (value: string) =>
       parseNonEmptyValue("Resume session id", value),
     )

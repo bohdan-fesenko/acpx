@@ -89,6 +89,8 @@ function detectAgentToken(argv: string[]): AgentTokenScan {
       token === "--cwd" ||
       token === "--auth-policy" ||
       token === "--non-interactive-permissions" ||
+      token === "--permission-policy" ||
+      token === "--policy" ||
       token === "--format" ||
       token === "--model" ||
       token === "--allowed-tools" ||
@@ -105,6 +107,8 @@ function detectAgentToken(argv: string[]): AgentTokenScan {
       token.startsWith("--cwd=") ||
       token.startsWith("--auth-policy=") ||
       token.startsWith("--non-interactive-permissions=") ||
+      token.startsWith("--permission-policy=") ||
+      token.startsWith("--policy=") ||
       token.startsWith("--format=") ||
       token.startsWith("--model=") ||
       token.startsWith("--allowed-tools=") ||

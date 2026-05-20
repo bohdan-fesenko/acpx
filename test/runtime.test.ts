@@ -394,7 +394,7 @@ test("AcpxRuntime falls back to plain runtimeSessionName handles and reuses a si
 
   await runtime.probeAvailability();
   assert.equal(runtime.isHealthy(), true);
-  assert.deepEqual(runtime.getCapabilities(), {
+  assert.deepEqual(await runtime.getCapabilities(), {
     controls: ["session/set_mode", "session/set_config_option", "session/status"],
   });
 
@@ -423,6 +423,68 @@ test("AcpxRuntime falls back to plain runtimeSessionName handles and reuses a si
   assert.deepEqual(turnEvents, []);
   assert.deepEqual(result, { status: "completed", stopReason: "end_turn" });
   assert.equal(managerFactoryCalls, 1);
+});
+
+test("AcpxRuntime exposes advertised config option keys for resolved handles", async () => {
+  const encoded = encodeAcpxRuntimeHandleState({
+    name: "agent:codex:acp:test",
+    agent: "codex",
+    cwd: "/workspace",
+    mode: "persistent",
+    acpxRecordId: "agent:codex:acp:test",
+    backendSessionId: "sid-1",
+    agentSessionId: "inner-1",
+  });
+  const store = createFileSessionStore({ stateDir: "/tmp/acpx-runtime-config-options" });
+  await store.save(
+    createSessionRecord({
+      acpx: {
+        config_options: [
+          {
+            id: "mode",
+            name: "Mode",
+            type: "select",
+            currentValue: "ask",
+            options: [{ value: "ask", name: "Ask" }],
+          },
+          {
+            id: "model",
+            name: "Model",
+            type: "select",
+            currentValue: "fast",
+            options: [{ value: "fast", name: "Fast" }],
+          },
+          {
+            id: "mode",
+            name: "Mode",
+            type: "select",
+            currentValue: "ask",
+            options: [{ value: "ask", name: "Ask" }],
+          },
+        ],
+      },
+    }),
+  );
+  const runtime = new AcpxRuntime({
+    cwd: "/workspace",
+    sessionStore: store,
+    agentRegistry: createAgentRegistry(),
+    permissionMode: "approve-reads",
+  });
+
+  assert.deepEqual(
+    await runtime.getCapabilities({
+      handle: {
+        sessionKey: "ignored-session-key",
+        backend: "acpx",
+        runtimeSessionName: encoded,
+      },
+    }),
+    {
+      controls: ["session/set_mode", "session/set_config_option", "session/status"],
+      configOptionKeys: ["mode", "model"],
+    },
+  );
 });
 
 test("createRuntimeStore is an alias for the file-backed session store", async (t) => {

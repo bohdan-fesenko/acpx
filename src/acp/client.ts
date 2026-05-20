@@ -26,6 +26,7 @@ import {
   type WaitForTerminalExitResponse,
   type WriteTextFileRequest,
   type WriteTextFileResponse,
+  type SessionConfigOption,
   type SessionModelState,
 } from "@agentclientprotocol/sdk";
 import { resolveBuiltInAgentLaunch } from "../agent-registry.js";
@@ -41,7 +42,12 @@ import {
   PermissionPromptUnavailableError,
 } from "../errors.js";
 import { FileSystemHandlers } from "../filesystem.js";
-import { classifyPermissionDecision, resolvePermissionRequest } from "../permissions.js";
+import {
+  classifyPermissionDecision,
+  decisionToResponse,
+  inferToolKind,
+  resolvePermissionRequestWithDetails,
+} from "../permissions.js";
 import { textPrompt } from "../prompt-content.js";
 import { extractRuntimeSessionId } from "../session/runtime-session-id.js";
 import { buildSpawnCommandOptions } from "../spawn-command-options.js";
@@ -64,6 +70,7 @@ import {
   isQoderAcpCommand,
   resolveAgentCloseAfterStdinEndMs,
   resolveClaudeAcpSessionCreateTimeoutMs,
+  resolveClaudeCodeExecutable,
   resolveGeminiAcpStartupTimeoutMs,
   resolveGeminiCommandArgs,
   shouldIgnoreNonJsonAgentOutputLine,
@@ -115,11 +122,13 @@ type LoadSessionOptions = {
 export type SessionCreateResult = {
   sessionId: string;
   agentSessionId?: string;
+  configOptions?: SessionConfigOption[];
   models?: SessionModelState;
 };
 
 export type SessionLoadResult = {
   agentSessionId?: string;
+  configOptions?: SessionConfigOption[];
   models?: SessionModelState;
 };
 
@@ -243,7 +252,11 @@ export class AcpClient {
   private loadedSessionId?: string;
   private eventHandlers: Pick<
     AcpClientOptions,
-    "onAcpMessage" | "onAcpOutputMessage" | "onSessionUpdate" | "onClientOperation"
+    | "onAcpMessage"
+    | "onAcpOutputMessage"
+    | "onSessionUpdate"
+    | "onClientOperation"
+    | "onPermissionEscalation"
   >;
   private readonly permissionStats: PermissionStats = {
     requested: 0,
@@ -263,6 +276,7 @@ export class AcpClient {
     promise: Promise<PromptResponse>;
   };
   private readonly cancellingSessionIds = new Set<string>();
+  private readonly permissionAbortControllers = new Map<string, AbortController>();
   private closing = false;
   private agentStartedAt?: string;
   private lastAgentExit?: AgentExitInfo;
@@ -281,6 +295,7 @@ export class AcpClient {
       onAcpOutputMessage: this.options.onAcpOutputMessage,
       onSessionUpdate: this.options.onSessionUpdate,
       onClientOperation: this.options.onClientOperation,
+      onPermissionEscalation: this.options.onPermissionEscalation,
     };
 
     this.filesystem = new FileSystemHandlers({
@@ -339,7 +354,11 @@ export class AcpClient {
   setEventHandlers(
     handlers: Pick<
       AcpClientOptions,
-      "onAcpMessage" | "onAcpOutputMessage" | "onSessionUpdate" | "onClientOperation"
+      | "onAcpMessage"
+      | "onAcpOutputMessage"
+      | "onSessionUpdate"
+      | "onClientOperation"
+      | "onPermissionEscalation"
     >,
   ): void {
     this.eventHandlers = { ...handlers };
@@ -352,6 +371,7 @@ export class AcpClient {
   updateRuntimeOptions(options: {
     permissionMode?: PermissionMode;
     nonInteractivePermissions?: NonInteractivePermissionPolicy;
+    permissionPolicy?: AcpClientOptions["permissionPolicy"];
     terminal?: boolean;
     suppressSdkConsoleErrors?: boolean;
     verbose?: boolean;
@@ -361,6 +381,9 @@ export class AcpClient {
     }
     if (options.nonInteractivePermissions !== undefined) {
       this.options.nonInteractivePermissions = options.nonInteractivePermissions;
+    }
+    if (Object.prototype.hasOwnProperty.call(options, "permissionPolicy")) {
+      this.options.permissionPolicy = options.permissionPolicy;
     }
     if (options.terminal !== undefined) {
       this.options.terminal = options.terminal;
@@ -436,13 +459,23 @@ export class AcpClient {
       await ensureCopilotAcpSupport(spawnCommand);
     }
 
+    const agentSpawnOptions = buildAgentSpawnOptions(
+      this.options.cwd,
+      this.options.authCredentials,
+    );
+    const claudeAcp = isClaudeAcpCommand(spawnCommand, args);
+    if (claudeAcp) {
+      const claudeExe = resolveClaudeCodeExecutable(process.platform, agentSpawnOptions.env);
+      if (claudeExe) {
+        agentSpawnOptions.env.CLAUDE_CODE_EXECUTABLE = claudeExe;
+        this.log(`resolved system Claude Code executable: ${claudeExe}`);
+      }
+    }
+
     const spawnedChild = spawn(
       spawnCommand,
       args,
-      buildSpawnCommandOptions(
-        spawnCommand,
-        buildAgentSpawnOptions(this.options.cwd, this.options.authCredentials),
-      ),
+      buildSpawnCommandOptions(spawnCommand, agentSpawnOptions),
     ) as ChildProcessByStdio<Writable, Readable, Readable>;
 
     try {
@@ -660,6 +693,7 @@ export class AcpClient {
     return {
       sessionId: result.sessionId,
       agentSessionId: extractRuntimeSessionId(result._meta),
+      configOptions: result.configOptions ?? undefined,
       models: result.models ?? undefined,
     };
   }
@@ -706,6 +740,7 @@ export class AcpClient {
 
     return {
       agentSessionId: extractRuntimeSessionId(response?._meta),
+      configOptions: response?.configOptions ?? undefined,
       models: response?.models ?? undefined,
     };
   }
@@ -753,6 +788,7 @@ export class AcpClient {
         this.activePrompt = undefined;
       }
       this.cancellingSessionIds.delete(sessionId);
+      this.abortAndDropPermissionSignal(sessionId);
       this.promptPermissionFailures.delete(sessionId);
     }
   }
@@ -832,6 +868,7 @@ export class AcpClient {
   async cancel(sessionId: string): Promise<void> {
     const connection = this.getConnection();
     this.cancellingSessionIds.add(sessionId);
+    this.abortAndDropPermissionSignal(sessionId);
     await this.runConnectionRequest(() =>
       connection.cancel({
         sessionId,
@@ -842,7 +879,7 @@ export class AcpClient {
   async closeSession(sessionId: string): Promise<void> {
     const connection = this.getConnection();
     await this.runConnectionRequest(() =>
-      connection.unstable_closeNes({
+      connection.closeSession({
         sessionId,
       }),
     );
@@ -930,6 +967,10 @@ export class AcpClient {
     this.suppressReplaySessionUpdateMessages = false;
     this.activePrompt = undefined;
     this.cancellingSessionIds.clear();
+    for (const controller of this.permissionAbortControllers.values()) {
+      controller.abort();
+    }
+    this.permissionAbortControllers.clear();
     this.promptPermissionFailures.clear();
     this.loadedSessionId = undefined;
     this.initResult = undefined;
@@ -1188,13 +1229,61 @@ export class AcpClient {
       };
     }
 
+    if (this.options.onPermissionRequest) {
+      const signal = this.cancellationSignalForSession(params.sessionId);
+      try {
+        const decision = await this.options.onPermissionRequest(
+          {
+            sessionId: params.sessionId,
+            raw: params,
+            inferredKind: inferToolKind(params),
+          },
+          { signal },
+        );
+        if (signal.aborted || this.cancellingSessionIds.has(params.sessionId)) {
+          this.recordPermissionDecision("cancelled");
+          return {
+            outcome: {
+              outcome: "cancelled",
+            },
+          };
+        }
+        if (decision) {
+          const response = decisionToResponse(params, decision);
+          this.recordPermissionDecision(classifyPermissionDecision(params, response));
+          return response;
+        }
+      } catch (error) {
+        if (signal.aborted || this.cancellingSessionIds.has(params.sessionId)) {
+          this.recordPermissionDecision("cancelled");
+          return {
+            outcome: {
+              outcome: "cancelled",
+            },
+          };
+        }
+        // Fall through to the mode-based resolver so a host UI error
+        // doesn't take down the turn.
+        this.log(
+          `onPermissionRequest threw, falling through to mode-based resolver: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+
     let response: RequestPermissionResponse;
     try {
-      response = await resolvePermissionRequest(
+      const result = await resolvePermissionRequestWithDetails(
         params,
         this.options.permissionMode,
         this.options.nonInteractivePermissions ?? "deny",
+        this.options.permissionPolicy,
       );
+      response = result.response;
+      if (result.escalation) {
+        this.eventHandlers.onPermissionEscalation?.(result.escalation);
+      }
     } catch (error) {
       if (error instanceof PermissionPromptUnavailableError) {
         this.notePromptPermissionFailure(params.sessionId, error);
@@ -1359,6 +1448,23 @@ export class AcpClient {
     params: ReleaseTerminalRequest,
   ): Promise<ReleaseTerminalResponse> {
     return await this.terminalManager.releaseTerminal(params);
+  }
+
+  private cancellationSignalForSession(sessionId: string): AbortSignal {
+    let controller = this.permissionAbortControllers.get(sessionId);
+    if (!controller) {
+      controller = new AbortController();
+      this.permissionAbortControllers.set(sessionId, controller);
+    }
+    return controller.signal;
+  }
+
+  private abortAndDropPermissionSignal(sessionId: string): void {
+    const controller = this.permissionAbortControllers.get(sessionId);
+    if (controller) {
+      controller.abort();
+      this.permissionAbortControllers.delete(sessionId);
+    }
   }
 
   private recordPermissionDecision(decision: "approved" | "denied" | "cancelled"): void {

@@ -82,8 +82,10 @@ export type QueueTask = {
   permissionMode: PermissionMode;
   resumePolicy?: SessionResumePolicy;
   nonInteractivePermissions?: NonInteractivePermissionPolicy;
+  permissionPolicy?: AcpClientOptions["permissionPolicy"];
   timeoutMs?: number;
   suppressSdkConsoleErrors?: boolean;
+  promptRetries?: number;
   sessionOptions?: NonNullable<AcpClientOptions["sessionOptions"]>;
   waitForCompletion: boolean;
   enqueuedAt: number;
@@ -93,6 +95,7 @@ export type QueueTask = {
 
 export type QueueOwnerControlHandlers = {
   cancelPrompt: () => Promise<boolean>;
+  closeSession: (timeoutMs?: number) => Promise<boolean>;
   setSessionMode: (modeId: string, timeoutMs?: number) => Promise<void>;
   setSessionModel: (modelId: string, timeoutMs?: number) => Promise<void>;
   setSessionConfigOption: (
@@ -395,6 +398,19 @@ export class SessionQueueOwner {
         return;
       }
 
+      if (request.type === "close_session") {
+        this.handleControlRequest({
+          socket,
+          requestId: request.requestId,
+          run: async () => ({
+            type: "close_session_result",
+            requestId: request.requestId,
+            closed: await this.controlHandlers.closeSession(request.timeoutMs),
+          }),
+        });
+        return;
+      }
+
       if (request.type === "set_mode") {
         this.handleControlRequest({
           socket,
@@ -451,8 +467,10 @@ export class SessionQueueOwner {
         permissionMode: request.permissionMode,
         resumePolicy: request.resumePolicy,
         nonInteractivePermissions: request.nonInteractivePermissions,
+        permissionPolicy: request.permissionPolicy,
         timeoutMs: request.timeoutMs,
         suppressSdkConsoleErrors: request.suppressSdkConsoleErrors,
+        promptRetries: request.promptRetries,
         sessionOptions: request.sessionOptions,
         waitForCompletion: request.waitForCompletion,
         enqueuedAt: Date.now(),

@@ -3,10 +3,15 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { resolveClaudeCodeExecutable } from "../src/acp/agent-command.js";
 import { resolveAgentSessionCwd } from "../src/acp/client-process.js";
 import { buildAgentSpawnOptions, buildSpawnCommandOptions } from "../src/acp/client.js";
 import { buildTerminalSpawnOptions } from "../src/acp/terminal-manager.js";
 import { buildQueueOwnerSpawnOptions } from "../src/cli/session/queue-owner-process.js";
+import {
+  buildTerminalShellSpawnCommand,
+  buildTerminalSpawnCommand,
+} from "../src/spawn-command-options.js";
 
 test("buildAgentSpawnOptions hides Windows console windows and preserves auth env", () => {
   const options = buildAgentSpawnOptions("/tmp/acpx-agent", {
@@ -129,11 +134,44 @@ test("buildSpawnCommandOptions keeps shell disabled for non-batch commands", asy
   }
 });
 
+test("buildTerminalSpawnCommand preserves explicit argv", () => {
+  assert.deepEqual(buildTerminalSpawnCommand("node", ["-e", "console.log('ok')"]), {
+    command: "node",
+    args: ["-e", "console.log('ok')"],
+    killProcessGroup: false,
+  });
+  assert.deepEqual(buildTerminalSpawnCommand("/tmp/tool with space", []), {
+    command: "/tmp/tool with space",
+    args: [],
+    killProcessGroup: false,
+  });
+  assert.deepEqual(buildTerminalSpawnCommand("/tmp/tool with space", undefined), {
+    command: "/tmp/tool with space",
+    args: [],
+    killProcessGroup: false,
+  });
+});
+
+test("buildTerminalShellSpawnCommand routes command lines through the shell", () => {
+  assert.deepEqual(buildTerminalShellSpawnCommand("echo hello | tr a-z A-Z", "darwin"), {
+    command: "/bin/sh",
+    args: ["-c", "echo hello | tr a-z A-Z"],
+    killProcessGroup: true,
+  });
+  assert.deepEqual(buildTerminalShellSpawnCommand("dir C:\\Users", "win32"), {
+    command: "cmd.exe",
+    args: ["/d", "/s", "/c", "dir C:\\Users"],
+    killProcessGroup: true,
+  });
+});
+
 test("resolveAgentSessionCwd translates WSL cwd for Windows exe agents", async () => {
   let capturedCwd: string | undefined;
+  const inputCwd = "/home/user/project";
+  const resolvedCwd = path.resolve(inputCwd);
 
   const cwd = await resolveAgentSessionCwd(
-    "/home/user/project",
+    inputCwd,
     '"/mnt/c/Users/User/AppData/Local/GitHub CLI/copilot/copilot.exe" --acp --stdio',
     {
       platform: "linux",
@@ -145,7 +183,7 @@ test("resolveAgentSessionCwd translates WSL cwd for Windows exe agents", async (
     },
   );
 
-  assert.equal(capturedCwd, "/home/user/project");
+  assert.equal(capturedCwd, resolvedCwd);
   assert.equal(cwd, "\\\\wsl.localhost\\Ubuntu\\home\\user\\project");
 });
 
@@ -157,7 +195,8 @@ test("resolveAgentSessionCwd leaves non-WSL and non-Windows agents on resolved c
       throw new Error("wslpath should not run");
     },
   });
-  const wslNodeAgent = await resolveAgentSessionCwd("/home/user/project", "node ./agent.js", {
+  const inputCwd = "/home/user/project";
+  const wslNodeAgent = await resolveAgentSessionCwd(inputCwd, "node ./agent.js", {
     platform: "linux",
     existsSync: (filePath) => filePath === "/proc/sys/fs/binfmt_misc/WSLInterop",
     runWslpath: async () => {
@@ -166,7 +205,60 @@ test("resolveAgentSessionCwd leaves non-WSL and non-Windows agents on resolved c
   });
 
   assert.equal(nonWsl, path.resolve("relative/project"));
-  assert.equal(wslNodeAgent, "/home/user/project");
+  assert.equal(wslNodeAgent, path.resolve(inputCwd));
+});
+
+test("resolveAgentSessionCwd translates WSL cwd for Windows .cmd wrappers", async () => {
+  let capturedCwd: string | undefined;
+  const inputCwd = "/home/user/project";
+  const resolvedCwd = path.resolve(inputCwd);
+
+  const cwd = await resolveAgentSessionCwd(
+    inputCwd,
+    '"/mnt/c/Program Files/nodejs/npx.cmd" some-acp-agent --stdio',
+    {
+      platform: "linux",
+      existsSync: (filePath) => filePath === "/proc/sys/fs/binfmt_misc/WSLInterop",
+      runWslpath: async (value) => {
+        capturedCwd = value;
+        return "\\\\wsl.localhost\\Ubuntu\\home\\user\\project\n";
+      },
+    },
+  );
+
+  assert.equal(capturedCwd, resolvedCwd);
+  assert.equal(cwd, "\\\\wsl.localhost\\Ubuntu\\home\\user\\project");
+});
+
+test("resolveAgentSessionCwd translates WSL cwd for Windows agents on non-C drives", async () => {
+  let capturedCwd: string | undefined;
+  const inputCwd = "/home/user/project";
+  const resolvedCwd = path.resolve(inputCwd);
+
+  const cwd = await resolveAgentSessionCwd(inputCwd, "/mnt/d/tools/agent.bat --acp", {
+    platform: "linux",
+    existsSync: (filePath) => filePath === "/proc/sys/fs/binfmt_misc/WSLInterop",
+    runWslpath: async (value) => {
+      capturedCwd = value;
+      return "\\\\wsl.localhost\\Ubuntu\\home\\user\\project\n";
+    },
+  });
+
+  assert.equal(capturedCwd, resolvedCwd);
+  assert.equal(cwd, "\\\\wsl.localhost\\Ubuntu\\home\\user\\project");
+});
+
+test("resolveAgentSessionCwd does not translate WSL cwd for extension-less commands under /mnt/<drive>/", async () => {
+  const inputCwd = "/home/user/project";
+  const cwd = await resolveAgentSessionCwd(inputCwd, "/mnt/c/tools/linux-agent --acp", {
+    platform: "linux",
+    existsSync: (filePath) => filePath === "/proc/sys/fs/binfmt_misc/WSLInterop",
+    runWslpath: async () => {
+      throw new Error("wslpath should not run for extension-less /mnt/<drive>/ commands");
+    },
+  });
+
+  assert.equal(cwd, path.resolve(inputCwd));
 });
 
 test("resolveAgentSessionCwd rejects empty wslpath output", async () => {
@@ -226,4 +318,59 @@ test("buildTerminalSpawnOptions keeps shell disabled for non-batch commands", as
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }
+});
+
+test("resolveClaudeCodeExecutable finds claude.exe on PATH on Windows", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-claude-exe-"));
+  try {
+    await fs.writeFile(path.join(tempDir, "claude.exe"), "");
+    const env = { PATH: tempDir, PATHEXT: ".COM;.EXE;.BAT;.CMD" } as NodeJS.ProcessEnv;
+    const result = resolveClaudeCodeExecutable("win32", env);
+    assert.equal(result, path.join(tempDir, "claude.exe"));
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveClaudeCodeExecutable returns undefined when CLAUDE_CODE_EXECUTABLE is already set", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-claude-exe-"));
+  try {
+    await fs.writeFile(path.join(tempDir, "claude.exe"), "");
+    const env = {
+      PATH: tempDir,
+      PATHEXT: ".COM;.EXE;.BAT;.CMD",
+      CLAUDE_CODE_EXECUTABLE: "/custom/claude",
+    } as NodeJS.ProcessEnv;
+    const result = resolveClaudeCodeExecutable("win32", env);
+    assert.equal(result, undefined);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveClaudeCodeExecutable respects case-insensitive env var on Windows", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "acpx-claude-exe-"));
+  try {
+    await fs.writeFile(path.join(tempDir, "claude.exe"), "");
+    const env = {
+      PATH: tempDir,
+      PATHEXT: ".COM;.EXE;.BAT;.CMD",
+      claude_code_executable: "/custom/claude",
+    } as NodeJS.ProcessEnv;
+    const result = resolveClaudeCodeExecutable("win32", env);
+    assert.equal(result, undefined);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveClaudeCodeExecutable returns undefined on non-Windows platforms", () => {
+  const result = resolveClaudeCodeExecutable("linux", { PATH: "/usr/bin" } as NodeJS.ProcessEnv);
+  assert.equal(result, undefined);
+});
+
+test("resolveClaudeCodeExecutable returns undefined when claude is not on PATH", () => {
+  const env = { PATH: "/nonexistent", PATHEXT: ".COM;.EXE;.BAT;.CMD" } as NodeJS.ProcessEnv;
+  const result = resolveClaudeCodeExecutable("win32", env);
+  assert.equal(result, undefined);
 });

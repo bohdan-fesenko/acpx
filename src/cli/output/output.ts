@@ -22,6 +22,7 @@ import type {
   OutputFormat,
   OutputFormatter,
   OutputErrorOrigin,
+  PermissionEscalationEvent,
 } from "../../types.js";
 import { createJsonOutputFormatter } from "./json-formatter.js";
 import { isReadLikeTool, SUPPRESSED_READ_OUTPUT } from "./read-suppression.js";
@@ -788,6 +789,24 @@ class TextOutputFormatter implements OutputFormatter {
     }
   }
 
+  onPermissionEscalation(event: PermissionEscalationEvent): void {
+    this.flushThoughtBuffer();
+    this.beginSection("client");
+    this.writeLine(`${this.bold("[permission]")} ${event.message}`);
+    const details = [
+      `sessionId: ${event.sessionId}`,
+      `toolCallId: ${event.toolCallId}`,
+      event.toolName ? `toolName: ${event.toolName}` : undefined,
+      `toolTitle: ${event.toolTitle}`,
+      event.toolInput !== undefined
+        ? `toolInput: ${summarizeToolInput(event.toolInput) ?? "(structured input)"}`
+        : undefined,
+      event.toolKind ? `toolKind: ${event.toolKind}` : undefined,
+      event.matchedRule ? `matchedRule: ${event.matchedRule}` : undefined,
+    ].filter((line): line is string => Boolean(line));
+    this.writeLine(indentBlock(details.join("\n"), "  "));
+  }
+
   flush(): void {
     this.flushThoughtBuffer();
     if (!this.atLineStart) {
@@ -1040,6 +1059,10 @@ class QuietOutputFormatter implements OutputFormatter {
     acp?: OutputErrorAcpPayload;
     timestamp?: string;
   }): void {
+    // no-op in quiet mode
+  }
+
+  onPermissionEscalation(_event: PermissionEscalationEvent): void {
     // no-op in quiet mode
   }
 
