@@ -5,7 +5,14 @@ import { fileURLToPath } from "node:url";
 const ACP_ADAPTER_PACKAGE_RANGES = {
   pi: "^0.0.26",
   codex: "^0.12.0",
-  claude: "^0.31.0",
+  // Brain fork patch: bumped from ^0.31.0 → ^0.33.0 for ACP wire protocol v4.
+  // openclaw v2026.5.19-beta.2 gateway expects vacp v4; ^0.31.0 spawned a
+  // claude-agent-acp subprocess that announced vacp min=3 max=3 → gateway
+  // rejected every connection with "protocol mismatch". 0.33.x speaks vacp v4.
+  // Anthropic also fixed the musl-only native binary issue: claude-agent-sdk
+  // 0.2.132 ships @anthropic-ai/claude-agent-sdk-linux-x64 with libc:["glibc"],
+  // so our prior 0.30.0 glibc-pin workaround is no longer needed.
+  claude: "^0.33.0",
 } as const;
 
 type BuiltInAgentPackageSpec = {
