@@ -53,7 +53,7 @@
     "lint:persisted-key-casing": "tsx scripts/lint-persisted-key-casing.ts",
     "perf:report": "tsx scripts/perf-report.ts",
     "precommit": "pnpm exec lint-staged && pnpm run -s build",
-    "prepack": "pnpm run build",
+    "prepack": "npm run build",
     "prepare": "husky",
     "test": "pnpm run build:test && node --test dist-test/test/*.test.js",
     "test:coverage": "pnpm run build:test && node --experimental-test-coverage --test-coverage-exclude=dist-test/test/**/*.js --test-coverage-lines=83 --test-coverage-branches=76 --test-coverage-functions=86 --test dist-test/test/*.test.js",
